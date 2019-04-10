@@ -1,6 +1,10 @@
 ---
 title: "Stanislaw"
 output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '1'
   pdf_document:
     number_sections: yes
     toc: yes
@@ -14,7 +18,7 @@ rstan_options(auto_write = TRUE)
 ```
 
 # Goal
-\textbf{What is the goal of statistical analysis in science?}
+What is the goal of statistical analysis in science?
 
 One way to think about it: we want to build models with parameters that inform our theories. 
 
@@ -54,7 +58,7 @@ Stan and other MCMC techniques allow us to approximate very high dimensional pro
 # What is Stan?
 Stan is a probabilistic programming language.
 
-Stan uses Hamiltonian MCMC to approximate $p(\theta \mid y)$. See https://observablehq.com/@herbps10/hamiltonian-monte-carlo for an animated explaination.
+Stan uses Hamiltonian MCMC to approximate $p(\theta\mid y)$. See https://observablehq.com/@herbps10/hamiltonian-monte-carlo for an animated explanation.
 
 We can write out (almost) any probabilistic model and get full probability distributions to express our uncertainty about model parameters!
 
@@ -160,7 +164,7 @@ y_n &\sim N(\mu_n, \sigma^2) \\
 Priors
 
 \begin{align*}
-\mu &\sim \text{N}(0, 10) \\
+b_0 &\sim \text{N}(0, 10) \\
 b_1 &\sim \text{N}(0, 5) \\
 \sigma &\sim \text{HalfCauchy}(0, 10)
 \end{align*}
@@ -204,7 +208,7 @@ y_n &\sim N(\mu_n, \sigma_n^2) \\
 Priors
 
 \begin{align*}
-\mu &\sim \text{N}(0, 10) \\
+b_0 &\sim \text{N}(0, 10) \\
 b_1 &\sim \text{N}(0, 5) \\
 t0 &\sim \text{Cauchy}(0, 10) \\
 t1 &\sim \text{Cauchy}(0, 5)

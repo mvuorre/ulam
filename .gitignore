@@ -4,7 +4,6 @@
 .Ruserdata
 *_cache/
 *_files/
-*.html
 *.rds
 *.docx
 *.tex

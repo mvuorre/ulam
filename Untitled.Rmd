@@ -1,0 +1,276 @@
+---
+title: "Stanislaw"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 1
+---
+
+```{r setup, include=FALSE}
+library(rstan)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, comment = NA)
+rstan_options(auto_write = TRUE)
+```
+
+# Goal
+\textbf{What is the goal of statistical analysis in science?}
+
+One way to think about it: we want to build models with parameters that inform our theories. 
+
+We can use probability to evaluate and express uncertainty about possible values of these parameters, and to compare and criticize the models themselves.
+
+What are the plausible values of some parameters $\theta$ after we have observed our data?
+
+$$
+p( \theta \mid y) \propto p(y \mid \theta) p(\theta)\\
+$$
+For writing out models more explicitly, we'll need to specify how the likelihood ($p(y \mid \theta)$: the probability of our data given some specific set of parameters) for each data point contributes to the overall probability. 
+
+$$
+p( \theta \mid y) \propto p(\theta)\prod\limits_{n=1}^{N}p(y_n \mid \theta) \\
+$$
+
+For coding models in stan, it might be helpful to think also about adding up the log probability for each observation to the overall log probability.
+
+$$
+\log{p( \theta \mid y)} \propto \log{p(\theta)} + \sum\limits_{n=1}^{N}\log{p(y_n \mid \theta)} \\
+$$
+
+[We won't cover it, but think about how you could extend this joint probability if you had N observations for each of S subjects, with $\theta$ split up into $\theta_{group}$ and $\theta_{subject}$ ]
+
+# Why Stan?
+So, the functions above let us evaluate the probability of any parameter values given our data. If we plug in all the possible (binned) values our parameters could take on, we have a posterior probability distribution!
+
+Many interesting models have too many parameters to do this...
+
+Maybe we just search for the best combination of parameters and use those? (Maximum likelihood or Maximum a posteriori)
+
+Not as informative, and we can get weird answers for some types of parameters (see literally every lmer error)
+
+Stan and other MCMC techniques allow us to approximate very high dimensional probability distributions without trying out every combination of parameters.
+
+
+# What is Stan?
+Stan is a probabilistic programming language.
+
+Stan uses Hamiltonian MCMC to approximate $p(\theta \mid y)$. See https://observablehq.com/@herbps10/hamiltonian-monte-carlo for an animated explaination.
+
+We can write out (almost) any probabilistic model and get full probability distributions to express our uncertainty about model parameters!
+
+Stan can be used through R with the **rstan** package:
+
+```{r}
+library(rstan)
+```
+
+# Models
+
+## Example dataset
+
+Suppose it's 1905 and we are evaluating the effectiveness of two soporific drugs. (R: `?sleep`)
+
+We measured 20 volunteers' normal sleep durations. We then gave 10 volunteers drug A and 10 volunteers drug B, and measured how much longer they slept compared to their usual sleep duration. Let's keep things general and call the extra duration of sleep $Y$, and the drug variable $X$.
+
+```{r, echo = FALSE, fig.width = 4, fig.align = 'center'}
+dat <- sleep[,1:2]
+names(dat) <- c("y", "x")
+dat$x <- as.integer(dat$x)-1
+boxplot(y ~ x, dat, ylab = "Y", xlab = "X")
+```
+
+We will then start building statistical models to help us evaluate the potentially different effects of these two drugs. We consider three gaussian models of the extra sleep duration $Y$:
+
+1. 2-parameter model: One mean and one standard deviation.
+2. 3-parameter model: Different means for the two drugs, common SD.
+3. 4-parameter model: Different means and SDs for the two drugs.
+
+## Model 1
+
+We assume that the extra sleep durations $y_n$ in $1, \dots, N$ are normally distributed, with mean $\mu$ and standard deviation $\sigma$.
+
+You have seen this model before written out as
+
+\begin{align*}
+y_n &= \mu + \varepsilon_n, \text{where} \\ 
+\varepsilon_n &\sim N(0, \sigma^2)
+\end{align*}
+
+But we prefer the following notation for its clarity and emphasis on data rather than errors.
+
+$$
+y_n \sim N(\mu, \sigma^2)
+$$
+
+To complete the model, we specify vague priors on both parameters.
+
+\begin{align*}
+\mu &\sim \text{N}(0, 10) \\
+\sigma &\sim \text{HalfCauchy}(0, 10)
+\end{align*}
+
+We specify this mathematical model in Stan language in three "blocks" of code: `data`, `parameters`, and `model`. Before looking at the code, let's look at our data to make sure we understand what data is going into our model (Stan requires data to be input as a list, not a data.frame)
+
+```{r, echo = -1}
+datalist <- c(N = nrow(dat), as.list(dat))
+datalist
+```
+
+Then we write out our Stan code. Note how the data block corresponds to the list of data in R, and how the model block corresponds to the mathematical statements above. We also show in the model block the many equivalent ways of writing the data model (these are commented out with `//`)
+
+```{r print-model1, echo = FALSE}
+cat(readLines("m1.stan"), sep = "\n")
+```
+
+We have saved this model into `m1.stan`. To sample from the model's posterior, we pass the filename to `stan()` with a variable indicating the data list in current R environment.
+
+```{r fit1, results = 'hide'}
+fit1 <- stan(
+  "m1.stan", 
+  data = datalist
+)
+```
+
+After Stan has drawn samples, we can summarize the parameters' posterior draws numerically, graphically, or transform them to give posteriors of other interesting unknown quantities.
+
+```{r}
+print(fit1, probs = c(.05, .5, .95))
+plot(as.data.frame(fit1)[,1:2])
+hist(as.data.frame(fit1)$mu,main=NULL,xlab="Mu",breaks=50,col='green')
+```
+
+
+If you are familiar with R's formula syntax, the above model is similar to
+
+```{r, eval = FALSE}
+lm(y ~ 1, data = dat)
+```
+
+## Model 2
+
+Our previous model was not that interesting because we didn't have any predictors of $\mu$ or $\sigma$. We first ask if the mean of extra sleep durations varies between the two drugs (e.g. perhaps drug A led to greater sleep duration increases than drug B or vice versa.)
+
+We do this by writing out a linear model for $\mu$, predicting it from an intercept and effect of drug B.
+
+\begin{align*}
+y_n &\sim N(\mu_n, \sigma^2) \\
+\mu_n &= b_0 + b_1D_n
+\end{align*}
+
+Priors
+
+\begin{align*}
+\mu &\sim \text{N}(0, 10) \\
+b_1 &\sim \text{N}(0, 5) \\
+\sigma &\sim \text{HalfCauchy}(0, 10)
+\end{align*}
+
+Note that the Drug variable is binary here (making this a two sample t-test), but it could also be continuous (making this a univariate regression), or a factor with > 2 levels (making this an ANOVA)... The Stan code is very similar to above
+
+```{r print-model2, echo = FALSE}
+cat(readLines("m2.stan"), sep = "\n")
+```
+
+```{r fit2, results = 'hide'}
+fit2 <- stan(
+  "m2.stan", 
+  data = datalist
+)
+```
+
+```{r}
+print(fit2, probs = c(.05, .5, .95))
+plot(as.data.frame(fit2)[,1:3])
+```
+
+You may recognize this model in R's formula syntax as
+
+```{r, eval = FALSE}
+lm(y ~ x, data = dat)
+```
+
+## Model 3
+
+Hold on, why are we only modeling the location of the assumed gaussian of extra sleep durations as possibly differing between drugs? It is reasonable to expect that the spread may also vary between drugs. Previously, we had a linear model of $\mu$. It may not be obvious but we can also write models for $\sigma$. 
+
+The only complication is that standard deviations must be strictly positive. Therefore, it is useful to model it through a link function that makes it positive. Most common choice is a log-link, which we use here.
+
+\begin{align*}
+y_n &\sim N(\mu_n, \sigma_n^2) \\
+\mu_n &= b_0 + b_1D_n \\
+\sigma_n &= \text{exp}(t_0 + t_1D_n)
+\end{align*}
+
+Priors
+
+\begin{align*}
+\mu &\sim \text{N}(0, 10) \\
+b_1 &\sim \text{N}(0, 5) \\
+t0 &\sim \text{Cauchy}(0, 10) \\
+t1 &\sim \text{Cauchy}(0, 5)
+\end{align*}
+
+```{r print-model3, echo = FALSE}
+cat(readLines("m3.stan"), sep = "\n")
+```
+
+```{r fit3, results = 'hide'}
+fit3 <- stan(
+  "m3.stan", 
+  data = datalist
+)
+```
+
+```{r}
+print(fit3, probs = c(.05, .5, .95))
+plot(as.data.frame(fit3)[,c("b0", "b1", "sigma_Da", "sigma_Db")])
+```
+
+Previously, we were able to point out the equivalent `lm()` formulas. Is there one for this? What classical "test" does it roughly correspond to?
+
+## Posteriors of other quantities
+
+Consider the standardized effect size metric of the difference of two means
+
+$$
+d = \frac{\mu_a - \mu_b}{\sqrt{(\sigma_a^2 + \sigma_b^2)/2}}
+$$
+
+A point estimate of this is typically reported. But as is with means, raw effects, etc, we should not accept reporting of quantities of interest without some representation of their corresponding uncertainty.
+
+It is easy to calculate posteriors for QOIs, like $d$, given our posterior samples:
+
+```{r}
+p3 <- as.data.frame(fit3)
+p3$mua <- p3$b0
+p3$mub <- p3$b0 + p3$b1
+
+p3$d <- with(p3, (mub - mua) / (sqrt(sigma_Da^2 + sigma_Db^2) / 2))
+hist(p3$d, breaks = 50)
+```
+
+# Cool things we couldn't cover
+
+## Multilevel models
+Can extend this approach to hierarchically structured data
+
+No more Hessian errors or variances of 0!
+
+## Custom models
+(Almost) no limit to the types of models and parameters available to you.
+
+E.g. Reinforcement Learning models can be very easily evaluated in Stan.
+
+Out of luck in (g)lm(er)
+
+## Model comparison
+Can generate distributions of your favorite Information Criteria!
+
+Express uncertainty in our model comparisons.
+
+## Model checking
+Everything we've done so far assumes the truth of the underlying model.
+
+Models are not true!
+
+With Stan, we can generate new data, examine the ways our actual data don't match it, and hopefully build a less-untrue model.
